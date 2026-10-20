@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PondPulse</title>
+<style>
+  body{font-family:Calibri,Arial,sans-serif;background:#fff;color:#0f172a;max-width:440px;margin:24px auto;padding:0 16px}
+  h1{color:#0b2545;margin-bottom:4px} p.sub{color:#64748b;margin-top:0}
+  label{display:block;margin:12px 0 4px;font-weight:600}
+  input{width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:6px;box-sizing:border-box}
+  button{margin-top:16px;width:100%;padding:12px;background:#0e9aa7;color:#fff;border:0;border-radius:6px;font-size:16px;font-weight:700;cursor:pointer}
+  #out{margin-top:20px;padding:16px;border-radius:8px;display:none;background:#f1f5f9;border-left:6px solid #64748b}
+  #risk{font-size:22px;font-weight:700;margin:0 0 8px}
+  .SAFE{border-color:#16a34a!important}.SAFE #risk{color:#16a34a}
+  .WATCH{border-color:#d97706!important}.WATCH #risk{color:#d97706}
+  .DANGER{border-color:#dc2626!important}.DANGER #risk{color:#dc2626}
+  #msg{font-size:18px;font-weight:700}
+</style></head><body>
+<h1>PondPulse</h1><p class="sub">Early warning for your pond</p>
+<form id="f">
+  <label>Pond photo</label><input type="file" name="photo" accept="image/*">
+  <label>Dissolved oxygen (mg/L)</label><input name="oxygen" type="number" step="0.1">
+  <label>pH</label><input name="ph" type="number" step="0.1">
+  <label>Temperature (°C)</label><input name="temperature" type="number" step="0.1">
+  <button type="submit">Check my pond</button>
+</form>
+<div id="out"><p id="risk"></p><p id="msg"></p></div>
+<script>
+document.getElementById("f").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  for (const k of ["oxygen","ph","temperature"]) if (fd.get(k) === "") fd.delete(k);
+  const r = await (await fetch("/api/assess", {method:"POST", body:fd})).json();
+  const out = document.getElementById("out");
+  out.className = r.risk; out.style.display = "block";
+  document.getElementById("risk").textContent = r.risk;
+  document.getElementById("msg").textContent = r.alert;
+});
+</script></body></html>
