@@ -1,38 +1,62 @@
-<!doctype html>
-<html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PondPulse</title>
 <style>
-  body{font-family:Calibri,Arial,sans-serif;background:#fff;color:#0f172a;max-width:440px;margin:24px auto;padding:0 16px}
-  h1{color:#0b2545;margin-bottom:4px} p.sub{color:#64748b;margin-top:0}
-  label{display:block;margin:12px 0 4px;font-weight:600}
-  input{width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:6px;box-sizing:border-box}
-  button{margin-top:16px;width:100%;padding:12px;background:#0e9aa7;color:#fff;border:0;border-radius:6px;font-size:16px;font-weight:700;cursor:pointer}
-  #out{margin-top:20px;padding:16px;border-radius:8px;display:none;background:#f1f5f9;border-left:6px solid #64748b}
-  #risk{font-size:22px;font-weight:700;margin:0 0 8px}
-  .SAFE{border-color:#16a34a!important}.SAFE #risk{color:#16a34a}
-  .WATCH{border-color:#d97706!important}.WATCH #risk{color:#d97706}
-  .DANGER{border-color:#dc2626!important}.DANGER #risk{color:#dc2626}
-  #msg{font-size:18px;font-weight:700}
-</style></head><body>
-<h1>PondPulse</h1><p class="sub">Early warning for your pond</p>
-<form id="f">
-  <label>Pond photo</label><input type="file" name="photo" accept="image/*">
-  <label>Dissolved oxygen (mg/L)</label><input name="oxygen" type="number" step="0.1">
-  <label>pH</label><input name="ph" type="number" step="0.1">
-  <label>Temperature (°C)</label><input name="temperature" type="number" step="0.1">
-  <button type="submit">Check my pond</button>
+body{font-family:Calibri,Arial,sans-serif;max-width:440px;margin:35px auto;padding:0 18px;color:#222}
+h1{color:#0b2545;margin-bottom:5px}.subtitle{color:#666;margin-top:0}
+label{display:block;margin-top:16px;font-weight:bold}
+input{box-sizing:border-box;width:100%;padding:9px;margin-top:6px}
+button{width:100%;margin-top:22px;padding:12px;border:0;border-radius:4px;background:#0e9aa7;color:white;font-size:16px;cursor:pointer}
+button:disabled{opacity:.65;cursor:wait}
+#result{display:none;margin-top:20px;padding:14px;border:2px solid;border-radius:5px}
+#result.SAFE{color:#176b35;border-color:#2e9d50}
+#result.WATCH{color:#8a5700;border-color:#e2a12b}
+#result.DANGER{color:#a32121;border-color:#d64545}
+#error{color:#b42318;margin-top:12px}.note{color:#666;font-size:13px}
+</style>
+</head>
+<body>
+<h1>PondPulse</h1>
+<p class="subtitle">Early pond health and water-quality alerts</p>
+<form id="pondForm">
+<label for="photo">Pond photo</label>
+<input id="photo" type="file" name="photo" accept="image/*">
+<label for="oxygen">Dissolved oxygen (mg/L)</label>
+<input id="oxygen" name="oxygen" type="number" step="0.1" min="0" placeholder="Enter oxygen level">
+<label for="ph">pH</label>
+<input id="ph" name="ph" type="number" step="0.1" min="0" max="14" placeholder="Enter pH">
+<label for="temperature">Water temperature (°C)</label>
+<input id="temperature" name="temperature" type="number" step="0.1" placeholder="Enter temperature">
+<button id="submitButton" type="submit">Check my pond</button>
 </form>
-<div id="out"><p id="risk"></p><p id="msg"></p></div>
+<p id="error" role="alert"></p>
+<div id="result" aria-live="polite">
+<h2 id="risk"></h2><p id="alert"></p><p class="note" id="note"></p>
+</div>
 <script>
-document.getElementById("f").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const fd = new FormData(e.target);
-  for (const k of ["oxygen","ph","temperature"]) if (fd.get(k) === "") fd.delete(k);
-  const r = await (await fetch("/api/assess", {method:"POST", body:fd})).json();
-  const out = document.getElementById("out");
-  out.className = r.risk; out.style.display = "block";
-  document.getElementById("risk").textContent = r.risk;
-  document.getElementById("msg").textContent = r.alert;
+const form=document.getElementById("pondForm");
+const button=document.getElementById("submitButton");
+const result=document.getElementById("result");
+const error=document.getElementById("error");
+form.addEventListener("submit",async function(event){
+ event.preventDefault(); error.textContent=""; result.style.display="none";
+ button.disabled=true; button.textContent="Checking...";
+ const data=new FormData(form);
+ ["oxygen","ph","temperature"].forEach(name=>{if(!data.get(name))data.delete(name);});
+ try{
+  const response=await fetch("/api/assess",{method:"POST",body:data});
+  const answer=await response.json();
+  if(!response.ok)throw new Error(answer.detail||"Something went wrong.");
+  document.getElementById("risk").textContent=answer.risk;
+  document.getElementById("alert").textContent=answer.alert;
+  document.getElementById("note").textContent=answer.note;
+  result.className=answer.risk; result.style.display="block";
+ }catch(err){error.textContent=err.message;}
+ finally{button.disabled=false;button.textContent="Check my pond";}
 });
-</script></body></html>
+</script>
+</body>
+</html>

@@ -1,24 +1,39 @@
 # PondPulse (MVP)
 
-Early disease and water-quality alerts for small aquaculture farms (Sahyadri DevHack 2026, PS 1.1).
+Early pond health and water-quality alerts for small aquaculture farms.
 
-A farmer enters a pond photo and readings (oxygen, pH, temperature). PondPulse returns a
-Safe / Watch / Danger risk and an English alert with the next action.
+Enter a pond photo and readings (dissolved oxygen, pH, temperature). PondPulse
+returns a SAFE / WATCH / DANGER screening result and an English alert.
 
-## Run
-    pip install -r requirements.txt
-    uvicorn app:app --reload
+## Project structure
+
+```text
+PondPulse/
+├── app.py
+├── requirements.txt
+├── README.md
+├── .gitignore
+└── static/
+    └── index.html
+```
+
+## Run locally
+
+Open this folder in VS Code, then run:
+
+```bash
+python -m pip install -r requirements.txt
+python -m uvicorn app:app --reload
+```
+
 Open http://127.0.0.1:8000
 
-## How it works
-1. `image_risk()` scores the pond photo (placeholder colour heuristic, to be replaced by a trained model)
-2. `assess()` checks readings against illustrative thresholds and combines everything into one risk class
-3. An alert message with the next action is returned
+Health check: http://127.0.0.1:8000/health
+API documentation: http://127.0.0.1:8000/docs
 
-## Next steps
-- Train an image classifier on public pond / disease datasets
-- Add WhatsApp / SMS delivery
-- Add Open-Meteo rainfall data to the risk engine
-- Tune thresholds with open water-quality data and expert advice
+## Important limitations
 
-Team Kryptonix, Yenepoya Institute of Technology, Moodbidri
+The photo score is a simple colour heuristic, not a trained ML model or disease
+classifier. The water-quality thresholds are illustrative and must be validated
+with fisheries experts and local water-testing guidance. This prototype is not
+a substitute for professional testing or advice.

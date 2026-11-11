@@ -1,241 +1,130 @@
-
-"""
-PondPulse MVP
-Photo + water readings -> SAFE / WATCH / DANGER -> English alert.
-
-Run locally:
-    uvicorn app:app --reload
-
-Open locally:
-    http://127.0.0.1:8000
-"""
-
+"""PondPulse backend. Run: python -m uvicorn app:app --reload"""
 import io
 from pathlib import Path
-from typing import Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageStat, UnidentifiedImageError
 
-app = FastAPI(
-    title="PondPulse MVP",
-    description="Pond water risk screening using readings and an optional photo.",
-    version="1.1.0",
-)
-
-# Resolve the frontend relative to this Python file.
-BASE_DIR = Path(__file__).resolve().parent
-INDEX_FILE = BASE_DIR / "static" / "index.html"
+app = FastAPI(title="PondPulse MVP", version="1.1.0")
+FRONTEND = Path(__file__).parent / "static" / "index.html"
 
 LEVELS = ["SAFE", "WATCH", "DANGER"]
-
-REASON = {
+REASONS = {
     "oxygen": "Check the water's dissolved oxygen.",
     "ph": "Check the water's pH.",
-    "temp": "Check the water temperature.",
-    "image": "Check the pond water colour.",
+    "temperature": "Check the water temperature.",
+    "photo": "Check the pond water colour.",
 }
-
-EN = {
+ALERTS = {
     "SAFE": "All looks normal. Keep monitoring.",
     "WATCH": "Early warning. Review water conditions and reduce feeding if appropriate.",
-    "DANGER": (
-        "High risk! Check the measurements immediately, increase aeration "
-        "if appropriate, and contact a fisheries officer or water-testing lab."
-    ),
+    "DANGER": "High risk! Check measurements immediately, increase aeration if appropriate, "
+              "and contact a fisheries officer or water-testing lab.",
 }
 
 
-def image_risk(data: bytes) -> float:
-    """
-    Placeholder image score between 0 and 1, based on colour and darkness.
-
-    This is NOT a trained algae, fish-disease, or water-quality classifier.
-    """
-    with Image.open(io.BytesIO(data)) as original:
-        img = original.convert("RGB").resize((64, 64))
-
-    pixels = list(img.getdata())
-    if not pixels:
-        return 0.0
-
-    count = len(pixels)
-    red = sum(pixel[0] for pixel in pixels) / count
-    green = sum(pixel[1] for pixel in pixels) / count
-    blue = sum(pixel[2] for pixel in pixels) / count
-
-    greenness = green - (red + blue) / 2
-    darkness = 1 - (red + green + blue) / (3 * 255)
-
-    score = greenness / 60 + darkness * 0.3
-    return round(max(0.0, min(1.0, score)), 2)
+def photo_score(photo_bytes):
+    """Basic colour score only; this is not a trained disease classifier."""
+    image = Image.open(io.BytesIO(photo_bytes)).convert("RGB").resize((64, 64))
+    red, green, blue = ImageStat.Stat(image).mean
+    green_score = green - (red + blue) / 2
+    dark_score = 1 - (red + green + blue) / (3 * 255)
+    score = green_score / 60 + dark_score * 0.3
+    return round(max(0, min(1, score)), 2)
 
 
-def assess(
-    do: Optional[float],
-    ph: Optional[float],
-    temp: Optional[float],
-    img: Optional[float],
-):
-    """
-    Illustrative screening thresholds only.
-    Validate thresholds with fisheries experts before real-world use.
-    """
-    level = 0
-    reasons = []
+def assess_pond(oxygen, ph, temperature, image_score):
+    risk, reasons = 0, []
 
-    def bump(new_level: int, reason: str):
-        nonlocal level
-        level = max(level, new_level)
+    def warn(level, reason):
+        nonlocal risk
+        risk = max(risk, level)
         if reason not in reasons:
             reasons.append(reason)
 
-    if do is not None:
-        if do < 3:
-            bump(2, "oxygen")
-        elif do < 4:
-            bump(1, "oxygen")
+    if oxygen is not None:
+        if oxygen < 3:
+            warn(2, "oxygen")
+        elif oxygen < 4:
+            warn(1, "oxygen")
 
     if ph is not None:
         if ph < 6.5 or ph > 9:
-            bump(2, "ph")
+            warn(2, "ph")
         elif ph < 7.5 or ph > 8.5:
-            bump(1, "ph")
+            warn(1, "ph")
 
-    if temp is not None:
-        if temp > 34 or temp < 18:
-            bump(2, "temp")
-        elif temp > 32 or temp < 22:
-            bump(1, "temp")
+    if temperature is not None:
+        if temperature < 18 or temperature > 34:
+            warn(2, "temperature")
+        elif temperature < 22 or temperature > 32:
+            warn(1, "temperature")
 
-    if img is not None:
-        if img > 0.7:
-            bump(2, "image")
-        elif img > 0.4:
-            bump(1, "image")
+    if image_score is not None:
+        if image_score > 0.7:
+            warn(2, "photo")
+        elif image_score > 0.4:
+            warn(1, "photo")
 
-    name = LEVELS[level]
-    message_parts = [REASON[reason] for reason in reasons]
-    message_parts.append(EN[name])
-    message = " ".join(message_parts)
-
-    return name, reasons, message
+    level = LEVELS[risk]
+    alert = " ".join([REASONS[item] for item in reasons] + [ALERTS[level]])
+    return level, reasons, alert
 
 
-@app.get("/", response_class=FileResponse)
+@app.get("/")
 def home():
-    """Serve the PondPulse frontend."""
-    if not INDEX_FILE.is_file():
-        raise HTTPException(
-            status_code=500,
-            detail=(
-                "Frontend file not found. Expected static/index.html "
-                "next to app.py."
-            ),
-        )
-
-    return FileResponse(INDEX_FILE, media_type="text/html")
+    if not FRONTEND.is_file():
+        raise HTTPException(500, "Frontend not found: create static/index.html.")
+    return FileResponse(FRONTEND)
 
 
 @app.get("/health")
 def health():
-    """Basic deployment health check."""
-    return {
-        "status": "ok",
-        "frontend_found": INDEX_FILE.is_file(),
-    }
+    return {"status": "ok", "frontend_found": FRONTEND.is_file()}
 
 
 @app.post("/api/assess")
 async def api_assess(
-    oxygen: Optional[float] = Form(None),
-    ph: Optional[float] = Form(None),
-    temperature: Optional[float] = Form(None),
-    photo: Optional[UploadFile] = File(None),
+    oxygen: float | None = Form(None),
+    ph: float | None = Form(None),
+    temperature: float | None = Form(None),
+    photo: UploadFile | None = File(None),
 ):
-    """Assess optional readings and an optional pond-water photo."""
+    if all(value is None for value in (oxygen, ph, temperature)) and not (
+        photo and photo.filename
+    ):
+        raise HTTPException(400, "Provide at least one water reading or a pond photo.")
 
-    # Require at least one input.
-    has_reading = any(
-        value is not None for value in (oxygen, ph, temperature)
-    )
-    has_photo = photo is not None and bool(photo.filename)
-
-    if not has_reading and not has_photo:
-        raise HTTPException(
-            status_code=400,
-            detail="Provide at least one water reading or a pond photo.",
-        )
-
-    # Validate numeric values.
     if oxygen is not None and oxygen < 0:
-        raise HTTPException(
-            status_code=422,
-            detail="Dissolved oxygen cannot be negative.",
-        )
-
+        raise HTTPException(422, "Dissolved oxygen cannot be negative.")
     if ph is not None and not 0 <= ph <= 14:
-        raise HTTPException(
-            status_code=422,
-            detail="pH must be between 0 and 14.",
-        )
-
+        raise HTTPException(422, "pH must be between 0 and 14.")
     if temperature is not None and not -10 <= temperature <= 100:
-        raise HTTPException(
-            status_code=422,
-            detail="Temperature must be between -10 and 100 °C.",
-        )
+        raise HTTPException(422, "Temperature must be between -10 and 100 °C.")
 
-    img_score = None
-
-    if has_photo:
+    image_score = None
+    if photo and photo.filename:
         try:
-            image_bytes = await photo.read()
-
-            if not image_bytes:
-                raise HTTPException(
-                    status_code=400,
-                    detail="The uploaded photo is empty.",
-                )
-
-            # Prevent unexpectedly large image uploads.
-            max_bytes = 10 * 1024 * 1024
-            if len(image_bytes) > max_bytes:
-                raise HTTPException(
-                    status_code=413,
-                    detail="Photo must be 10 MB or smaller.",
-                )
-
-            img_score = image_risk(image_bytes)
-
+            photo_bytes = await photo.read()
+            if not photo_bytes:
+                raise HTTPException(400, "The uploaded photo is empty.")
+            if len(photo_bytes) > 10 * 1024 * 1024:
+                raise HTTPException(413, "Photo must be 10 MB or smaller.")
+            image_score = photo_score(photo_bytes)
         except UnidentifiedImageError:
-            raise HTTPException(
-                status_code=400,
-                detail="The uploaded file is not a valid image.",
-            )
+            raise HTTPException(400, "The uploaded file is not a valid image.")
         except OSError:
-            raise HTTPException(
-                status_code=400,
-                detail="The uploaded image could not be read.",
-            )
+            raise HTTPException(400, "The uploaded image could not be read.")
         finally:
             await photo.close()
 
-    level, reasons, message = assess(
-        oxygen,
-        ph,
-        temperature,
-        img_score,
-    )
-
+    level, reasons, alert = assess_pond(oxygen, ph, temperature, image_score)
     return {
         "risk": level,
         "reasons": reasons,
-        "image_score": img_score,
-        "alert": message,
-        "note": (
-            "Illustrative screening only; not a substitute for "
-            "validated water testing or professional advice."
-        ),
+        "image_score": image_score,
+        "alert": alert,
+        "note": "Illustrative screening only; not a substitute for validated water testing "
+                "or professional advice.",
     }
